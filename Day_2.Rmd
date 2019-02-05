@@ -1,0 +1,34 @@
+---
+title: "Day_2"
+author: "Amalie Lysgaard Andersen"
+date: "5/2/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+setwd("~/Library/Mobile Documents/com~apple~CloudDocs/4. Aarhus Universitet/4. Semester/1. Computational Modelling/1. Eyetracking workshop/rfolder/callingET")
+
+#Packages
+library(pacman)
+p_load("tidyverse")
+
+#data
+df <- read.csv("day2_samples.csv")
+```
+
+About the data:
+- 10 trials
+
+
+Determine fixations from raw data
+
+We take two data points - substract the latter from the former and divide by the time stamp
+
+```{r}
+# Columns with velocity
+df <-  group_by(df, ParticipantID)
+
+
+```
+
+
