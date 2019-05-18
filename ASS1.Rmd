@@ -10,25 +10,24 @@ output:
 
 ### Setup ###
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center') 
-```
-
 ```{r libraries}
 ## Set working directory to the relevant one on your computer    
 getwd()  
 setwd("~/Library/Mobile Documents/com~apple~CloudDocs/4. Aarhus Universitet/4. Semester/1. Computational Modelling/1. Eyetracking workshop/rfolder/callingET")
 
 library(pacman)
-p_load("desc", "tidyverse", "lme4", "stringr", "stringi", "BBmisc", "MuMIn")
-library(BBmisc) 
+p_load("desc", "tidyverse", "lme4", "stringr", "stringi", "BBmisc", "MuMIn", "Metrics", "caret", "groupdata2", "cvms", "ggrepel", "jpeg")
+
 ``` 
 
 
 ### Load data ###
-```{r load data} 
-Fixations <- read_csv('fixations2018_2019.csv') 
-Saccades <- read_csv('saccades2018_2019.csv')
+```{r general load data} 
+#Fixations <- read.csv("fixations2018_2019.csv", sep = ";") 
+#Saccades <- read_csv('saccades2018_2019.csv')
+
+Fixations <- read.csv("fixations2018_2019_5.csv") 
+Saccades <- read_csv('saccades2018_2019_5.csv')
 
 # Make sure variables are of the right type
 Fixations <- Fixations %>%
@@ -37,7 +36,7 @@ Fixations <- Fixations %>%
     Year = as.factor(Year),
     Task = as.factor(Task),
     ParticipantGender = as.factor(ParticipantGender),
-    Item = as.factor(Item),
+    Item = as.factor(Item)
     #StartTime_scaled = scale(StartTime)
     #StartTime_norm = normalize(StartTime, method = "standardize", margin = 1L, on.constant = "quiet")
   )
@@ -54,7 +53,31 @@ Saccades <- Saccades %>%
   )
 ```
 
-```{r Filtering data} 
+```{r Participants}
+participant <- as.data.frame(unique(VS_Fixations$ParticipantID))
+#12 Participants
+VS_Fixations %>% 
+  dplyr::group_by(ParticipantID, ParticipantGender) %>%
+  dplyr::summarise(n())
+VS_Fixations %>%
+  dplyr::group_by(ParticipantID) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  dplyr::summarise(n())
+# 8 female, 4 male, 6 from each year
+SE_Fixations %>%
+  filter(Year == "2018")%>%
+  dplyr::group_by(ParticipantID, ParticipantGender) %>%
+  #unique(ParticipantID) %>%
+  #filter(is.na(ParticipantGender)) %>%
+  dplyr::summarise(n())
+# 7 female, 5 male, 6 from each year
+# 4 female, 2 male, 2018
+```
+
+
+### Data for VS ###
+```{r Filtering data}  
 #Filtering out blinks  
 Saccades <-  filter(Saccades, Blink == "FALSE")
 
@@ -78,19 +101,63 @@ VS_Fixations <- VS_Fixations %>%
 ```
 
 ```{r scale}
-VS_Fixations$StartTime_scaled <- scale(VS_Fixations$StartTime)
+VS_Fixations$StartTime_scaled <- scale(VS_Fixations$StartTime) 
 VS_Saccades$StartTime_scaled <- scale(VS_Saccades$StartTime)
 ```
 
+### Data for SE ###
+```{r SE Extra data: video info}
+# Loading and splitting    
+logfiles <- read.csv("logfilesSE.csv")
+extraextra <- read.table(text = as.character(logfiles$Video), sep = "_")
 
-###### Visual search ######
+# Changing names
+logfiles$gender <- extraextra$V1
+logfiles$position <- extraextra$V4 
+logfiles$ostension <- extraextra$V5 
+  
+# Scalin starttime
+#Fixations$StartTime_scaled <- scale(Fixations$StartTime)  
+#Saccades$StartTime_scaled <- scale(Saccades$StartTime) 
+
+# Separating by 2018
+fix18 <- filter(Fixations, Year == "2018")
+sac18 <- filter(Saccades, Year =="2018")
+
+# Merging logfiles with 2018 data
+allfix18 <- merge(fix18,logfiles)
+allsac18 <- merge(sac18,logfiles)
+
+# Filtering out start time length above 5 sec
+allfix18 <- filter(allfix18, allfix18$StartTime <= 5000 & allfix18$ParticipantID != "2018-4_1_F")
+allsac18 <- filter(allsac18, allsac18$StartTime <= 5000 & allfix18$ParticipantID != "2018-4_1_F")
+
+#Scaling
+allfix18$StartTime_scaled <- scale(allfix18$StartTime)
+allsac18$StartTime_scaled <- scale(allsac18$StartTime)
+ 
+# ^ Final datasets 
+```
+
+```{r Filtering new data }  
+fixations_vs <- filter(Fixations, Fixations$Task != "SocialEngagement" & Fixations$StartTime <= 20000 &  Fixations$ParticipantID != "2018-1_1_f1")
+ 
+fixations_vs <- fixations_vs %>%
+  group_by(Trial, ParticipantID) %>%
+  filter(Fixation != max(Fixation))
+
+saccades_vs <- filter(Saccades, Saccades$Task != "SocialEngagement" & Saccades$Blink == "FALSE" & Saccades$StartTime <= 20000 & Saccades$ParticipantID != "2018-1_1_f1")
+```
+
+
+                                                   ###### Visual search ######
 
 #Fixation: duration
 ```{r Fixation duration models} 
-#model 1 ---->>>> THIS IS OUR MODEL 
+#model 1
 fix_model_vs_1 <- glmer(Duration ~ Task * StartTime_scaled + (1 + Task | Item) +  (1 + Task | ParticipantID), family = gaussian(link = log),  REML = F, VS_Fixations)
 
-#model 2
+#model 2 --> here
 fix_model_vs_2 <- glmer(Duration ~ Task + StartTime_scaled + (1 + Task | Item) + (1 + Task + StartTime_scaled | ParticipantID), Family = gaussian(link=log), REML = F, VS_Fixations)
 
 #model 3
@@ -114,7 +181,7 @@ fix_model_vs_8 <- glmer(Duration ~ Item + StartTime_scaled + Task + (1 + Task | 
 #model 9
 fix_model_vs_9 <- glmer(Duration ~ Item + Task + (1 + Task | ParticipantID), REML = F, family = gaussian (link=log), VS_Fixations)
 
-#model 10
+#model 10 --> here
 fix_model_vs_10 <- glmer(Duration ~ Item + StartTime_scaled + (1 | ParticipantID), REML = F, family = gaussian (link=log), VS_Fixations)
 
 #model 11
@@ -143,7 +210,6 @@ summary(fix_model_vs_13)                   #YES  --> Final model - Task
 
 # Anova to find best models
 anova(fix_model_vs_1, fix_model_vs_10)
-
 ```
  
 ```{r R^2} 
@@ -159,7 +225,7 @@ r.squaredGLMM(fix_model_vs_13)
 
 ```
 
-```{r Cross validation} 
+```{r Cross validation}  
 p_load(cvms, groupdata2, metrics, caret)
 p_load(DT)
 
@@ -190,14 +256,13 @@ exp(-0.137008)
 
 Cross-validation predicts how well a model built from all the data will perform on new data. As with the test/train split, for a good modeling procedure, cross-validation performance and training performance should be close.
 ```{r CV fixation}
-MuMIn::r.squaredGLMM(fix_model_vs_12)
+MuMIn::r.squaredGLMM(fix_model_vs_12) 
 MuMIn::r.squaredGLMM(fix_model_vs_13)
 #             R2m        R2c
 #[1,] 3.01098e-07 0.01372651
 #              R2m        R2c
 ##[1,] 2.738067e-07 0.01225156
 
-p_load(cvms, groupdata2)
 data <- fold(VS_Fixations, k = 5,
              id_col = 'ParticipantID') %>% 
   arrange(.folds)
@@ -211,7 +276,7 @@ CV_fix <- cross_validate(data,
                          family = 'gaussian',
                          REML = FALSE)
 CV_fix
-p_load(Metrics)
+
 
 #Get the rmse of the full model's predictions
 rmse(VS_Fixations$Duration, predict(fix_model_vs_12))
@@ -220,7 +285,6 @@ rmse(VS_Fixations$Duration, predict(fix_model_vs_13))
 sd(VS_Fixations$Duration)
 #The model performs worse than actually taking the average. 
 #Very close when cross-validated though, but RMSE should be smaller than SD in a good model. 
-
 ```
 
 
@@ -232,7 +296,7 @@ sd(VS_Fixations$Duration)
 AMP = how far
 VEL = how fast
 ```{r Saccade modelling} 
-#### AMPLITUDE ###
+#### AMPLITUDE ### 
 amp_model_vs_1 <- glmer(Amplitude ~ Task * StartTime + (1 + Task | Item) +  (1 + Task | ParticipantID), family = gaussian(link = log), REML = F, VS_Saccades)
 
 amp_model_vs_2 <- glmer(Amplitude ~ Task + StartTime + (1 + Task | Item) +  (1 + Task | ParticipantID), family = gaussian(link = log), REML = F, VS_Saccades)
@@ -254,12 +318,12 @@ summary(vel_model_vs)
 ```
 
 ```{r CV saccades}
-data <- fold(VS_Saccades, k = 5,
+data <- fold(VS_Saccades, k = 5, 
              id_col = 'ParticipantID') %>% 
   arrange(.folds)
 # To specify models
 modelo <- (c("Amplitude ~ Task*StartTimeS + (1 + Task | Item) + (1 + Task | ParticipantID)", "Amplitude ~ Task + StartTimeS + (1 + Task | Item) + (1 + Task | ParticipantID)"))
-  
+
 # To crossvalidate
 CV_sac <- cross_validate(data, 
                          modelo, 
@@ -270,7 +334,7 @@ CV_sac
 ```
 
 # Plots
-```{r wow all gathered}
+```{r wow all gathered} 
 VS_Fixations %>% 
   ggplot() +
   aes(x = StartTime, color = Task, y = Duration ) +
@@ -296,18 +360,6 @@ ggplot(VS_Fixations, aes(x=Task, y=Duration, color=Task)) +
   ylim(0, 5000) +
   labs(title ='Distribution of Duration of Fixations Acording to Task')
 
-ggplot(allfix18, aes(x=StartTimeS, y=PupilSize, color=ParticipantGender)) + 
-  geom_smooth(method = "auto", se = F) + facet_grid(Position~Gender) +
-  labs(title ='Distribution of Duration of Fixations Acording to Task')
-
-ggplot(allfix18, aes(x=Fixation, y=PupilSize, color=ParticipantGender)) + 
-  geom_smooth(method = "auto", se = F) + facet_grid(Position~Gender) +
-  labs(title ='Distribution of Duration of Fixations Acording to Task')
-
-ggplot(allfix18, aes(x=Fixation, y=PupilSize, color=ParticipantGender)) + 
-  geom_smooth(method = "lm", se = F) + facet_grid(Position~Gender) +
-  labs(title ='Distribution of Duration of Fixations Acording to Task')
-
 VS_Saccades %>% 
   ggplot() +
   aes(x = StartTime, color = Task, y = Amplitude ) +
@@ -316,16 +368,38 @@ VS_Saccades %>%
 VS_Saccades %>% 
   ggplot() +
   aes(x = StartTime, color = Item, y = Amplitude ) +
-  geom_smooth(method = "auto", se = F) + facet_wrap(~Task)
+  geom_smooth(method = "auto", se = F) + 
+  facet_wrap(~Task)
 
 ggplot(VS_Saccades, aes(x=Task, y=Duration, color=Task)) + 
   geom_violin() +
   ylim(0, 5000) +
   labs(title ='Distribution of Duration of Fixations Acording to Task')
+
+#### Facet grids
+ggplot(allfix18, aes(x=StartTime, y=PupilSize, color=ParticipantGender)) + 
+  geom_smooth(method = "auto", se = F) + 
+  facet_grid(position~gender) +
+  labs(title ='Distribution of Duration of Fixations Acording to Task')
+
+ggplot(allfix18, aes(x=Fixation, y=PupilSize, color=ParticipantGender)) + 
+  geom_smooth(method = "auto", se = F) + 
+  facet_grid(position~gender) +
+  labs(title ='Distribution of Duration of Fixations Acording to Task')
+
+ggplot(allfix18, aes(x=Fixation, y=PupilSize, color=ParticipantGender)) + 
+  geom_smooth(method = "lm", se = F) + 
+  facet_grid(position~gender) +
+  labs(title ='Distribution of Duration of Fixations Acording to Task')
+
+ggplot(allfix18, aes(x=Fixation, y=PupilSize, color=ParticipantGender)) + 
+  geom_smooth(method = "lm", se = F) + 
+  facet_grid(position~gender) +
+  labs(title ='Distribution of Duration of Fixations Acording to Task')
 ```
 
 ```{r Heatmap count}
-## these colors work well for heatmaps (see https://gist.github.com/kalebr/6832380)
+## these colors work well for heatmaps (see https://gist.github.com/kalebr/6832380) 
 jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF",
                                  "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
 
@@ -344,7 +418,7 @@ ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
   theme_bw() + theme(legend.position = 'none')
 
 ### HEATMAP W/IMAGE
-img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- jpeg::readJPEG('day 5/Pics/VisualSearch/fjord.jpg')
 img <- grid::rasterGrob(img, interpolate=TRUE)
 
 #FINAL PLOT
@@ -363,15 +437,13 @@ ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
 ```
 
 ```{r Scanpath count}
-p_load(ggrepel, jpeg)
-
 VS_Fixations %>% filter(ParticipantID == "2019-2_2_f22"& Item == 'fjord.jpg')
 #COUNT task
 
 # Ploting scan path
 x = subset(VS_Fixations, ParticipantID ==	'2019-2_2_f22' & Item == 'fjord.jpg')
 
-img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- jpeg::readJPEG('day 5/Pics/VisualSearch/fjord.jpg')
 img <- grid::rasterGrob(img, interpolate=TRUE)
 
 #Scanpath w/image
@@ -424,7 +496,7 @@ ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
   theme_bw() + theme(legend.position = 'none')
 
 ### HEATMAP W/IMAGE
-img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- jpeg::readJPEG('day 5/Pics/VisualSearch/fjord.jpg')
 img <- grid::rasterGrob(img, interpolate=TRUE)
 
 #FINAL PLOT
@@ -436,21 +508,19 @@ ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
   scale_fill_gradientn(colours = jet.colors(10), trans="sqrt") +
   # facet_wrap(~Trial) +
   ## the following lines are for aesthetic purposes only
-  xlim(0,1920) + ylim(0,1080) +
+  xlim(0,1920) + ylim(0,1080) + 
   ggtitle('Heatmap for visual search task (star)') +
   theme_bw() + theme(legend.position = 'none')
 ```
 
 ```{r Scanpath star}
-p_load(ggrepel, jpeg)
-
 VS_Fixations %>% filter(ParticipantID == "2019-1_1_m11"& Item == 'fjord.jpg')
 #COUNT task
 
 # Ploting scan path
 x = subset(VS_Fixations, ParticipantID ==	'2019-1_1_m11' & Item == 'fjord.jpg')
 
-img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- jpeg::readJPEG('day 5/Pics/VisualSearch/fjord.jpg')
 img <- grid::rasterGrob(img, interpolate=TRUE)
 
 #Scanpath w/image
@@ -476,17 +546,17 @@ ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
   theme_bw() + theme(legend.position = 'none')
 ```
 
-
-OBS HER --> RET TIL MIT
 ```{r Heat map}
-p_load(ggrepel, jpeg)
-FixationsVS %>% filter(ParticipantID == "2019-2_2_f22"& Item == 'fjord.jpg')
+VS_Fixations %>% filter(ParticipantID == "2019-2_2_f22"& Item == 'fjord.jpg')
 #COUNT
-FixationsVS %>% filter(Item == 'fjord.jpg' & Task == 'VisualSearch_Star')
+VS_Fixations %>% filter(Item == 'fjord.jpg' & Task == 'VisualSearch_Star')
 #2019-1_1_m11
-img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+
+img <- jpeg::readJPEG('day 5/Pics/VisualSearch/fjord.jpg')
 img <- grid::rasterGrob(img, interpolate=TRUE)
-x = subset(FixationsVS, ParticipantID ==	'2019-2_2_f22' & Item == 'fjord.jpg')
+
+x = subset(VS_Fixations, ParticipantID ==	'2019-2_2_f22' & Item == 'fjord.jpg')
+
 ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
   annotation_custom(img, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
   geom_rect(xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf, fill = 'white', alpha = .02) +
@@ -495,11 +565,15 @@ ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
   ggrepel::geom_text_repel(aes(label = Fixation), size = 3, color = 'blue') +
   xlim(0,1920) + ylim(0,1080) +
   ggtitle('Scanpath for visual search task (COUNT)') +
-  theme_bw() + theme(legend.position = 'none')
+  theme_bw() + 
+  theme(legend.position = 'none')
+
 ## these colors work well for heatmaps (see https://gist.github.com/kalebr/6832380)
 jet.colors <- colorRampPalette(c("#00007F", "blue", "#007FFF",
                                  "cyan", "#7FFF7F", "yellow", "#FF7F00", "red", "#7F0000"))
+
 z = subset(VS_Fixations, ParticipantID ==	'2019-2_2_f22' & Item == 'fjord.jpg')
+
 #Just heatmap
 ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
   stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))),
@@ -511,10 +585,12 @@ ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
   xlim(0,1920) + ylim(0,1080) +
   ggtitle('Heatmap for visual search task') +
   theme_bw() + theme(legend.position = 'none')
+
 ### HEATMAP W/IMAGE
-img <- jpeg::readJPEG('Pics/VisualSearch/fjord.jpg')
+img <- jpeg::readJPEG('day 5/Pics/VisualSearch/fjord.jpg')
 img <- grid::rasterGrob(img, interpolate=TRUE)
-#FINAL PLOT
+
+### FINAL PLOT
 ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
   annotation_custom(img, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
   stat_density2d(geom="raster", aes(fill=..density.., alpha=sqrt(sqrt(..density..))), # alpha part: the vibrance of the colours are more intense when squarerooted!
@@ -523,10 +599,13 @@ ggplot(z, aes(x = PositionX, y = 1081-PositionY)) +
   scale_fill_gradientn(colours = jet.colors(10), trans="sqrt") +
   # facet_wrap(~Trial) +
   ## the following lines are for aesthetic purposes only
-  xlim(0,1920) + ylim(0,1080) +
+  xlim(0,1920) + 
+  ylim(0,1080) +
   ggtitle('Heatmap for visual search task') +
-  theme_bw() + theme(legend.position = 'none')
-###OTHER CONDITION
+  theme_bw() + 
+  theme(legend.position = 'none')
+
+### OTHER CONDITION
 x = subset(FixationsVS, ParticipantID ==	'2019-1_1_m11' & Item == 'fjord.jpg')
 ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
   annotation_custom(img, xmin=-Inf, xmax=Inf, ymin=-Inf, ymax=Inf) +
@@ -534,55 +613,16 @@ ggplot(x, aes(x = PositionX, y = 1081-PositionY)) +
   geom_path(alpha = .6, color = 'red') +
   geom_point(size = x$Duration*20,  color = '#6291D6', stroke = 1, shape = 21) +
   ggrepel::geom_text_repel(aes(label = Fixation), size = 3, color = 'blue') +
-  xlim(0,1920) + ylim(0,1080) +
+  xlim(0,1920) + 
+  ylim(0,1080) +
   ggtitle('Scanpath for visual search task (STAR)') +
-  theme_bw() + theme(legend.position = 'none')
+  theme_bw() + 
+  theme(legend.position = 'none')
 ```
 
 
-###### Social engagement ######
-```{r SE Extra data: video info}
-# Loading and splitting    
-logfiles <- read.csv("logfilesSE.csv")
-extraextra <- read.table(text = as.character(logfiles$Video), sep = "_")
-
-# Changing names
-logfiles$gender <- extraextra$V1
-logfiles$position <- extraextra$V4
-logfiles$ostension <- extraextra$V5
- 
-# Scalin starttime
-#Fixations$StartTime_scaled <- scale(Fixations$StartTime)  
-#Saccades$StartTime_scaled <- scale(Saccades$StartTime) 
-
-# Separating by 2018
-fix18 <- filter(Fixations, Year == "2018")
-sac18 <- filter(Saccades, Year =="2018")
-
-# Merging logfiles with 2018 data
-allfix18 <- merge(fix18,logfiles)
-allsac18 <- merge(sac18,logfiles)
-
-# Filtering out start time length above 5 sec
-allfix18 <- filter(allfix18, allfix18$StartTime <= 5000 & allfix18$ParticipantID != "2018-4_1_F")
-allsac18 <- filter(allsac18, allsac18$StartTime <= 5000 & allfix18$ParticipantID != "2018-4_1_F")
-
-#Scaling
-allfix18$StartTime_scaled <- scale(allfix18$StartTime)
-allsac18$StartTime_scaled <- scale(allsac18$StartTime)
- 
-# ^ Final datasets 
-```
-
-```{r Filtering new data }  
-fixations_vs <- filter(Fixations, Fixations$Task != "SocialEngagement" & Fixations$StartTime <= 20000 &  Fixations$ParticipantID != "2018-1_1_f1")
-
-fixations_vs <- fixations_vs %>%
-  group_by(Trial, ParticipantID) %>%
-  filter(Fixation != max(Fixation))
-
-saccades_vs <- filter(Saccades, Saccades$Task != "SocialEngagement" & Saccades$Blink == "FALSE" & Saccades$StartTime <= 20000 & Saccades$ParticipantID != "2018-1_1_f1")
-```
+                                                  ###### Social engagement ######
+                                                  
 
 Hypotheses
 - More emotionally engaged when involved in interaction (~direction & ostensiveness) ---> pupil size
@@ -593,7 +633,7 @@ Hypotheses
 
 
 ```{r Pupil size models}  
-# Pupil size models 
+# Pupil size models  
 pup_1 <- glmer(PupilSize ~ ostension * position + (1 | ParticipantID), family = gaussian(link = log), allfix18, REML = F)
 
 pup_2 <- glmer(PupilSize ~ ostension * position + StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), allfix18, REML = F)
@@ -613,6 +653,7 @@ pup_8 <- glmer(PupilSize ~ ParticipantGender * gender + position + StartTime_sca
 
 allfix18$position_r = relevel(allfix18$position, ref="div")
 allfix18$ParticipantGender_r = relevel(allfix18$ParticipantGender, ref="Male")
+
 #FINAL MODEL
 pup_9 <- glmer(PupilSize ~ ParticipantGender_r * gender * position_r * ostension + StartTime_scaled + (1 | ParticipantID), family = gaussian(link = log), allfix18, REML = F)
 
@@ -629,7 +670,7 @@ summary(pup_8) #significantly better than 2+4         significant interaction, p
 summary(pup_9) #                                      significant 4-way interaction what wohooo´fuck --> MAIN MODEL
 
 #Anovas 
-anova(pup_4, pup_8)
+anova(pup_4, pup_9)
 
 
 #### Familiarity
@@ -640,8 +681,8 @@ summary(SE_model_a)
 ```{r CV} 
 MuMIn::r.squaredGLMM(pup_8)
 #             R2m       R2c 
-# [1,] 1.71602e-07 0.1154295
-
+# [1,] 1.71602e-07 0.1154295 
+ 
 
 data_SE <- fold(Fixations2018, k = 2,
                 cat_col = c("ParticipantGender", 'Position', 'Gender'), 
@@ -664,11 +705,11 @@ CV_fix2018
 ```{r Saccades}
 attention_1 <- glmer(MeanVelocity ~ position + ostension + (1 | ParticipantID), family = gaussian(link = log), allsac18, REML = F)
 
-summary(attention_1)   # Shite
+summary(attention_1)   # Shite 
 ```
 
 ```{r Plots}
-allfix18 %>%  
+allfix18 %>%   
   group_by(ParticipantGender, gender, position, ostension) %>% 
   summarise(PupilMean = mean(PupilSize)) -> PS3
 
@@ -688,7 +729,7 @@ PS3 %>%
 
 ### General info ###
  
-```{r Participant info}  
+```{r Participant info}   
 VS_Fixations %>% 
   group_by(ParticipantID, ParticipantGender) %>%
   #unique(ParticipantID) %>%
