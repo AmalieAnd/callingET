@@ -11,13 +11,15 @@ output:
 ### Setup ###
 
 ```{r libraries}
-## Set working directory to the relevant one on your computer    
+## Set working directory to the relevant one on your computer     
 getwd()  
 setwd("~/Library/Mobile Documents/com~apple~CloudDocs/4. Aarhus Universitet/4. Semester/1. Computational Modelling/1. Eyetracking workshop/rfolder/callingET")
 
 library(pacman)
-p_load("desc", "tidyverse", "lme4", "stringr", "stringi", "BBmisc", "MuMIn", "Metrics", "caret", "groupdata2", "cvms", "ggrepel", "jpeg")
+p_load("desc", "tidyverse", "lme4", "stringr", "stringi", "BBmisc", "MuMIn", "Metrics", "caret", "groupdata2", "ggrepel", "jpeg", "devtools")
 
+devtools::install_github("LudvigOlsen/groupdata2")
+devtools::install_github("LudvigOlsen/cvms")
 ``` 
 
 
@@ -256,7 +258,7 @@ exp(-0.137008)
 
 Cross-validation predicts how well a model built from all the data will perform on new data. As with the test/train split, for a good modeling procedure, cross-validation performance and training performance should be close.
 ```{r CV fixation}
-MuMIn::r.squaredGLMM(fix_model_vs_12) 
+MuMIn::r.squaredGLMM(fix_model_vs_12)  
 MuMIn::r.squaredGLMM(fix_model_vs_13)
 #             R2m        R2c
 #[1,] 3.01098e-07 0.01372651
@@ -270,7 +272,7 @@ data <- fold(VS_Fixations, k = 5,
 fixation_models <- (c("Duration ~ Task + StartTime_scaled + (1 | ParticipantID)", "Duration ~ Item + StartTimeS + (1 | ParticipantID)"))
   
 # To crossvalidate
-CV_fix <- cross_validate(data, 
+CV_fix <- cvms::cross_validate(data, 
                          fixation_models, 
                          folds_col = '.folds',
                          family = 'gaussian',
